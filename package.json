@@ -1,0 +1,45 @@
+{
+  "name": "test-explorer-for-unity",
+  "displayName": "Test Explorer for Unity",
+  "description": "Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, in your open Editor or in a background worker that keeps it free.",
+  "version": "0.1.0",
+  "publisher": "dancra",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/dancraa/unity-test-explorer.git" },
+  "bugs": { "url": "https://github.com/dancraa/unity-test-explorer/issues" },
+  "homepage": "https://github.com/dancraa/unity-test-explorer#readme",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Testing"],
+  "keywords": ["unity", "unity3d", "test", "testing", "nunit", "test runner", "gamedev"],
+  "main": "./extension.js",
+  "bin": { "unity-tests": "./cli.js" },
+  "activationEvents": ["workspaceContains:ProjectSettings/ProjectVersion.txt"],
+  "contributes": {
+    "commands": [
+      {
+        "command": "unityTests.installBridge",
+        "title": "Unity Tests: Install or Update the Test Bridge"
+      }
+    ],
+    "configuration": {
+      "title": "Unity Tests",
+      "properties": {
+        "unityTests.maxTestsPerRun": {
+          "type": "number",
+          "default": 500,
+          "description": "Ask where to run when a run has more tests than this, since tests freeze the Editor while they run. 0 removes the limit."
+        },
+        "unityTests.sourceGlob": {
+          "type": "string",
+          "default": "",
+          "description": "Files searched to link tests to their source. Empty finds them from your test assembly definitions."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/logic.test.js test/mirror.test.js",
+    "test:unity": "node test/integration.js",
+    "package": "npx --yes @vscode/vsce@3 package"
+  }
+}
