@@ -27,9 +27,11 @@ namespace VsCodeTests
         private const string ActiveGuidKey = "VsCodeTests.ActiveGuid";
         private const string RefreshedKey = "VsCodeTests.Refreshed";
         private const string PendingPlayKey = "VsCodeTests.PendingPlay";
+        private const string YieldFramesKey = "VsCodeTests.YieldFrames";
 
         private static TestRunnerApi api;
         private static double nextPoll;
+        private static int framesInRun;
 
         // Set only in the headless worker, where the path comes from the command line.
         private static readonly string WorkerDirectory = ReadWorkerDirectory();
@@ -39,8 +41,17 @@ namespace VsCodeTests
             api = ScriptableObject.CreateInstance<TestRunnerApi>();
             api.hideFlags = HideFlags.HideAndDontSave;
             api.RegisterCallbacks(new RunCallbacks());
-            if (WorkerDirectory == null) EditorApplication.update += Poll;
-            else EditorApplication.update += CloseWorkerWindows;
+            if (WorkerDirectory == null)
+            {
+                EditorApplication.update += Poll;
+                EditorApplication.update += CountFrame;
+                // A reload clears the Test Framework's cache, including during a run.
+                if (SessionState.GetBool(YieldFramesKey, false)) EditorFrameYielder.Install();
+            }
+            else
+            {
+                EditorApplication.update += CloseWorkerWindows;
+            }
         }
 
         private static string ReadWorkerDirectory()
@@ -95,6 +106,12 @@ namespace VsCodeTests
 
         private static void Execute(TestMode mode, string[] names)
         {
+            // The worker has no UI to keep responsive, and Play Mode tests already run across frames.
+            bool yieldFrames = WorkerDirectory == null && mode == TestMode.EditMode;
+            SessionState.SetBool(YieldFramesKey, yieldFrames);
+            if (yieldFrames) EditorFrameYielder.Install();
+            else EditorFrameYielder.Remove();
+
             var filter = new Filter { testMode = mode, testNames = IsEmpty(names) ? null : names };
             SessionState.SetString(ActiveGuidKey, api.Execute(new ExecutionSettings(filter)));
         }
@@ -283,6 +300,13 @@ namespace VsCodeTests
             SessionState.EraseString(ActiveRunKey);
             SessionState.EraseString(ActiveGuidKey);
             SessionState.EraseString(PendingPlayKey);
+            SessionState.EraseBool(YieldFramesKey);
+            EditorFrameYielder.Remove();
+        }
+
+        private static void CountFrame()
+        {
+            if (SessionState.GetString(ActiveRunKey, "") != "") framesInRun++;
         }
 
         private static void Write(string id, BridgeEvent bridgeEvent)
@@ -308,12 +332,13 @@ namespace VsCodeTests
         {
             public void RunStarted(ITestAdaptor testsToRun)
             {
+                framesInRun = 0;
                 Emit(new BridgeEvent { type = "runStarted" });
             }
 
             public void RunFinished(ITestResultAdaptor result)
             {
-                if (!TryStartPendingPlayRun()) EndRun(new BridgeEvent { type = "done" }, 0);
+                if (!TryStartPendingPlayRun()) EndRun(new BridgeEvent { type = "done", frames = framesInRun }, 0);
             }
 
             public void TestStarted(ITestAdaptor test)
@@ -360,6 +385,7 @@ namespace VsCodeTests
             public string message;
             public string stack;
             public double duration;
+            public int frames;
             public TestNode[] tests;
         }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Keeps the Editor usable during Edit Mode runs in the open Editor, by giving it time between tests. It's jerky rather than frozen, and runs take slightly longer. Update the bridge package when prompted.
+- Adds an icon.
+
 ## 0.1.0
 
 First release.

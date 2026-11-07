@@ -2,3 +2,4 @@
 .gitignore
 test/**
 *.vsix
+icon.svg

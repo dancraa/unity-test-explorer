@@ -2,9 +2,10 @@
   "name": "test-explorer-for-unity",
   "displayName": "Test Explorer for Unity",
   "description": "Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, in your open Editor or in a background worker that keeps it free.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "dancra",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": { "type": "git", "url": "https://github.com/dancraa/unity-test-explorer.git" },
   "bugs": { "url": "https://github.com/dancraa/unity-test-explorer/issues" },
   "homepage": "https://github.com/dancraa/unity-test-explorer#readme",
@@ -27,7 +28,7 @@
         "unityTests.maxTestsPerRun": {
           "type": "number",
           "default": 500,
-          "description": "Ask where to run when a run has more tests than this, since tests freeze the Editor while they run. 0 removes the limit."
+          "description": "Ask where to run when a run has more tests than this, since tests slow the Editor down while they run. 0 removes the limit."
         },
         "unityTests.sourceGlob": {
           "type": "string",

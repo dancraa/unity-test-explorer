@@ -8,7 +8,7 @@ const install = require('./install');
 
 const INSTALL_BRIDGE = 'Install';
 const RUN_IN_WORKER = 'Run in Worker';
-const FREEZE_UNITY = 'Run in Unity (freezes it)';
+const RUN_IN_UNITY = 'Run in Unity';
 
 function activate(context) {
     const folder = (vscode.workspace.workspaceFolders || [])
@@ -192,11 +192,11 @@ function activate(context) {
         if (scope.needsConfirmation) {
             const choice = await vscode.window.showWarningMessage(
                 `Run ${scope.count} tests?`,
-                { modal: true, detail: 'The worker runs them in the background and keeps Unity free. Running in Unity freezes it until they finish.' },
+                { modal: true, detail: 'The worker runs them in the background and keeps Unity free. In Unity, the Editor is jerky until they finish, and slow tests can stall it.' },
                 RUN_IN_WORKER,
-                FREEZE_UNITY);
+                RUN_IN_UNITY);
             if (choice === RUN_IN_WORKER) return runInWorker(request, token);
-            if (choice !== FREEZE_UNITY) return;
+            if (choice !== RUN_IN_UNITY) return;
         }
         if (leaves.length === 0) return;
 

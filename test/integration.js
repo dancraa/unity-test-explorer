@@ -14,9 +14,37 @@ if (!unityExe || !projectRootArg) {
 }
 const projectRoot = path.resolve(projectRootArg);
 
-const EDIT_TESTS = `using NUnit.Framework;
+const EDIT_TESTS = `using System;
+using System.Collections;
+using NUnit.Framework;
+using NUnit.Framework.Interfaces;
+using UnityEngine.TestTools;
 namespace Fixture.Edit
 {
+    // Prove that the bridge leaves a project's own actions exactly as the Test Framework would run them.
+    public class MethodAction : Attribute, IOuterUnityTestAction
+    {
+        public static int Calls;
+        public IEnumerator BeforeTest(ITest test) { Calls++; yield return null; }
+        public IEnumerator AfterTest(ITest test) { yield return null; }
+    }
+
+    public class ClassAction : Attribute, IOuterUnityTestAction
+    {
+        public static int Calls;
+        public IEnumerator BeforeTest(ITest test) { Calls++; yield return null; }
+        public IEnumerator AfterTest(ITest test) { yield return null; }
+    }
+
+    [ClassAction]
+    public class ActionSampleTests
+    {
+        [Test, MethodAction] public void MethodActionRan() { Assert.Greater(MethodAction.Calls, 0); }
+
+        // Whether class actions run depends on the Test Framework version, so this only reports it.
+        [Test] public void ReportsClassAction() { Assert.Pass(ClassAction.Calls > 0 ? "class action ran" : "class action did not run"); }
+    }
+
     public class EditSampleTests
     {
         [Test] public void Passes() { Assert.Pass(); }
@@ -69,6 +97,7 @@ function createProject() {
 }
 
 let failures = 0;
+const workerEvents = [];
 function check(label, actual, expected) {
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
     if (!ok) failures++;
@@ -80,6 +109,8 @@ function results(events) {
 }
 
 const ALL_RESULTS = {
+    'ActionSampleTests.MethodActionRan': 'passed',
+    'ActionSampleTests.ReportsClassAction': 'passed',
     'EditSampleTests.Cases(1)': 'passed',
     'EditSampleTests.Cases(2)': 'failed',
     'EditSampleTests.Fails': 'failed',
@@ -99,7 +130,7 @@ async function testWorker() {
     fs.mkdirSync(worker.stateDir, { recursive: true });
     fs.writeFileSync(worker.unityPath, JSON.stringify({ path: unityExe, version }));
 
-    const all = [];
+    const all = workerEvents;
     let start = Date.now();
     let end = await worker.run({ onEvent: e => all.push(e) });
     console.log(`     worker, first full run: ${Math.round((Date.now() - start) / 1000)} s`);
@@ -146,11 +177,34 @@ async function testEditor() {
         }
         const modes = [...new Set(list.tests.filter(t => !t.isSuite).map(t => t.mode))].sort();
         check('editor: list covers both modes', modes, ['edit', 'play']);
-        check('editor: test count', list.tests.filter(t => !t.isSuite).length, 7);
+        check('editor: test count', list.tests.filter(t => !t.isSuite).length, 9);
+
+        const action = [];
+        await bridge.send({ action: 'run', editNames: ['Fixture.Edit.ActionSampleTests'] }, e => action.push(e));
+        check("editor: a project's method actions still run", results(action), {
+            'ActionSampleTests.MethodActionRan': 'passed',
+            'ActionSampleTests.ReportsClassAction': 'passed',
+        });
+        const report = events => (events.find(e => e.type === 'test' && e.fullName.endsWith('ReportsClassAction')) || {}).message;
+        console.log(`     class actions: ${report(workerEvents)}`);
+        check('editor: class actions match a run without the bridge frames', report(action), report(workerEvents));
 
         const edit = [];
         await bridge.send({ action: 'run', refresh: true, editNames: ['Fixture.Edit.EditSampleTests.Passes'] }, e => edit.push(e));
         check('editor: Edit Mode run', results(edit), { 'EditSampleTests.Passes': 'passed' });
+
+        const editClass = [];
+        const classEnd = await bridge.send({ action: 'run', editNames: ['Fixture.Edit.EditSampleTests'] }, e => editClass.push(e));
+        console.log(`     editor frames during a ${Object.keys(results(editClass)).length}-test class: ${classEnd.frames}`);
+        check('editor: a whole class gets the same results with frames', sorted(results(editClass)), {
+            'EditSampleTests.Cases(1)': 'passed',
+            'EditSampleTests.Cases(2)': 'failed',
+            'EditSampleTests.Fails': 'failed',
+            'EditSampleTests.Passes': 'passed',
+            'EditSampleTests.Skipped': 'skipped',
+        });
+        const editFailure = editClass.find(e => e.type === 'test' && e.fullName.endsWith('.Fails'));
+        check('editor: failure text survives', !!editFailure && editFailure.message.includes('edit failure'), true);
 
         const play = [];
         const end = await bridge.send({ action: 'run', playNames: ['Fixture.Play.PlaySampleTests'] }, e => play.push(e));

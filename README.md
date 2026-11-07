@@ -2,7 +2,7 @@
 
 Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, with failure messages, stack traces and links to the failing line.
 
-Tests normally freeze the Unity Editor while they run. For long runs, this extension can use a **background worker**: a headless Unity working on its own copy of your project, so your Editor stays free.
+Tests normally freeze the Unity Editor while they run. This extension gives the Editor time between Edit Mode tests, so it stays usable, though jerky. To keep it fully free, you can use a **background worker**: a headless Unity working on its own copy of your project.
 
 > This is an independent project. It isn't affiliated with or endorsed by Unity Technologies.
 
@@ -28,9 +28,20 @@ Click run on a class or test to run it in your open Editor. Each run first impor
 For Run All, anything above class level, or more than 500 tests, you're asked where to run:
 
 - **Run in Worker** runs them in the background and keeps Unity free.
-- **Run in Unity** runs them in the Editor, which freezes it until they finish.
+- **Run in Unity** runs them in the Editor, using no extra disk space.
 
 To use the worker for a smaller run, right-click it and choose **Execute Using Profile...**.
+
+### How the Editor behaves during a run
+
+Between Edit Mode tests, the Editor gets at least one frame, and up to 100 ms more after slower tests. This makes a run take slightly longer. You can click around and use the Editor, but expect it to be jerky:
+
+- A single test can't be interrupted, so a slow test stalls the Editor until it finishes.
+- You can't compile or enter Play Mode until the run ends. Use the worker if you need to.
+- Play Mode tests already run across frames, so they aren't changed.
+- Runs started from Unity's own Test Runner window aren't changed either.
+
+This relies on a private part of the Test Framework. If a future version changes it, tests still run normally, but the Editor freezes during them as usual.
 
 Runs in the open Editor are refused during Play Mode, with compile errors, or with unsaved open scenes, because each of those would make the run fail or block the Editor.
 

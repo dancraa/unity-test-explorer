@@ -42,7 +42,7 @@ function leavesOf(node, out = []) {
     return out;
 }
 
-/** Tests freeze the shared Editor, so runs above class level or over the limit need confirming. */
+/** Tests slow the shared Editor down, so runs above class level or over the limit need confirming. */
 function checkRunScope(nodes, maxTests) {
     const count = new Set(nodes.flatMap(n => leavesOf(n).map(l => l.fullName))).size;
     const broad = nodes.some(n => !n.typeName);
