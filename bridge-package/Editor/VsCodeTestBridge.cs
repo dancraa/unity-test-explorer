@@ -205,7 +205,8 @@ namespace VsCodeTests
                 return;
             }
 
-            if (EditorApplication.isPlayingOrWillChangePlaymode)
+            bool playing = EditorApplication.isPlayingOrWillChangePlaymode;
+            if (playing && command.action != "list")
             {
                 Finish(command, "rejected", "Unity is in Play Mode. Exit it and try again.");
                 return;
@@ -213,7 +214,8 @@ namespace VsCodeTests
 
             if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
 
-            if (command.refresh && SessionState.GetString(RefreshedKey, "") != command.id)
+            // A refresh in Play Mode can recompile and end the session, so listing there skips it.
+            if (command.refresh && !playing && SessionState.GetString(RefreshedKey, "") != command.id)
             {
                 SessionState.SetString(RefreshedKey, command.id);
                 AssetDatabase.Refresh();

@@ -37,7 +37,7 @@ Between Edit Mode tests, the Editor gets at least one frame, and up to 100 ms mo
 
 This relies on a private part of the Test Framework. If a future version changes it, tests still run normally, but the Editor freezes during them as usual.
 
-Runs in the open Editor are refused during Play Mode, with compile errors, or with unsaved open scenes, because each of those would make the run fail or block the Editor.
+Runs in the open Editor are refused during Play Mode, with compile errors, or with unsaved open scenes, because each of those would make the run fail or block the Editor. Tests still list during Play Mode, without the usual refresh, so new tests show up once you exit it and refresh.
 
 Test Framework 1.1, which Unity 2021.3 and 2022.3 can come with, can't cancel a run. In the open Editor, the run keeps going until it finishes.
 

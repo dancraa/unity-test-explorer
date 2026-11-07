@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Tests now list while Unity is in Play Mode, so the Testing tab isn't empty after reloading VS Code mid-playtest. Listing in Play Mode skips the asset refresh, which could recompile and end the session. Runs are still refused until you exit Play Mode. Update the bridge package when prompted.
+- If Unity refuses to list the tests, the reason is shown instead of an empty tab.
+
 ## 0.3.0
 
 - Asks before running slow tests in the open Editor: any test that took 10 s or more last time (`unityTests.slowTestSeconds`), and `[Explicit]` tests until they've run once. With the worker enabled, you can send them there instead.

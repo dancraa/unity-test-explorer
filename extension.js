@@ -75,7 +75,8 @@ function activate(context) {
     async function loadTests(refresh, showErrors) {
         const event = await enqueue(() => bridge.send({ action: 'list', refresh }, () => {}));
         if (event.type !== 'list') {
-            if (showErrors) vscode.window.showWarningMessage(`Unity Tests: ${event.message}`);
+            // A refusal explains an empty tab, so it's shown even when other errors stay quiet.
+            if (showErrors || event.type === 'rejected') vscode.window.showWarningMessage(`Unity Tests: ${event.message}`);
             return;
         }
         loaded = true;
