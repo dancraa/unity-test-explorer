@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
@@ -98,10 +99,12 @@ namespace VsCodeTests
         }
 
         // Test Framework 1.1 has no CancelTestRun, and a compile error here would block the whole
-        // project, so it's looked up at runtime. On those versions a run can't be stopped.
-        private static void CancelRun(string guid)
+        // project, so it's looked up at runtime. Returns false on those versions, where a run can't be stopped.
+        private static bool CancelRun(string guid)
         {
-            typeof(TestRunnerApi).GetMethod("CancelTestRun", new[] { typeof(string) })?.Invoke(null, new object[] { guid });
+            MethodInfo cancel = typeof(TestRunnerApi).GetMethod("CancelTestRun", new[] { typeof(string) });
+            cancel?.Invoke(null, new object[] { guid });
+            return cancel != null;
         }
 
         private static void Execute(TestMode mode, string[] names)
@@ -192,7 +195,13 @@ namespace VsCodeTests
                 File.Delete(CommandPath);
                 SessionState.EraseString(PendingPlayKey);
                 string guid = SessionState.GetString(ActiveGuidKey, "");
-                if (guid != "") CancelRun(guid);
+                // Only read once the current test returns, so this also tells the extension it has.
+                bool cancelled = guid == "" || CancelRun(guid);
+                Emit(new BridgeEvent
+                {
+                    type = "cancelling",
+                    message = cancelled ? "" : "This version of the Test Framework can't stop a run, so it continues to the end.",
+                });
                 return;
             }
 
@@ -250,6 +259,7 @@ namespace VsCodeTests
                 isAssembly = test.IsTestAssembly,
                 typeName = test.TypeInfo?.FullName ?? "",
                 methodName = test.Method?.Name ?? "",
+                isExplicit = test.RunState == RunState.Explicit,
             });
             foreach (ITestAdaptor child in test.Children) Flatten(child, index, mode, tests);
         }
@@ -400,6 +410,7 @@ namespace VsCodeTests
             public bool isAssembly;
             public string typeName;
             public string methodName;
+            public bool isExplicit;
         }
     }
 }

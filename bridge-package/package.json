@@ -1,7 +1,7 @@
 {
   "name": "com.dancra.vscode-test-bridge",
   "displayName": "VS Code Test Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "unity": "2021.3",
   "description": "Editor-only bridge that lets the Test Explorer for Unity VS Code extension list and run tests. It is not included in player builds.",
   "dependencies": {

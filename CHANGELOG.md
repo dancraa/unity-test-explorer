@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Asks before running slow tests in the open Editor: any test that took 10 s or more last time (`unityTests.slowTestSeconds`), and `[Explicit]` tests until they've run once. With the worker enabled, you can send them there instead.
+- Cancelling in the open Editor no longer shows the run as cancelled while Unity is still inside a test. The run stays open, says it stops once the current test finishes, and ends when Unity confirms. Update the bridge package when prompted.
+
 ## 0.2.1
 
 - The background worker is now optional and off by default. Turn on `unityTests.enableWorker` to use it. Without it, large runs start in the Editor straight away, and the extension never creates a copy of your project.

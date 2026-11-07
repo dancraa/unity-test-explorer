@@ -64,7 +64,8 @@ class UnityBridge {
         const start = Date.now();
         let seenEvent = false;
         let lastAliveCheck = start;
-        let cancelledAt = 0;
+        let cancelRequested = false;
+        let cancelAcknowledgedAt = 0;
         const removeCommand = () => fs.rmSync(this.commandPath, { force: true });
 
         try {
@@ -75,19 +76,25 @@ class UnityBridge {
                 for (const event of tail.poll()) {
                     seenEvent = true;
                     if (TERMINAL_EVENTS.has(event.type)) return event;
+                    if (event.type === 'cancelling') {
+                        // Without an acknowledgement the Editor is still inside a test, so there's no timeout yet.
+                        if (event.message) onEvent({ type: 'status', message: event.message });
+                        else cancelAcknowledgedAt = now;
+                        continue;
+                    }
                     onEvent(event);
                 }
 
-                if (cancellation && cancellation.isCancellationRequested && !cancelledAt) {
-                    cancelledAt = now;
-                    if (seenEvent) {
-                        this.writeCommand({ id, action: 'cancel' });
-                    } else {
+                if (cancellation && cancellation.isCancellationRequested && !cancelRequested) {
+                    cancelRequested = true;
+                    if (!seenEvent) {
                         removeCommand();
                         return { type: 'cancelled' };
                     }
+                    this.writeCommand({ id, action: 'cancel' });
+                    onEvent({ type: 'status', message: 'Unity stops the run once the current test finishes. A test can\'t be interrupted while it runs.' });
                 }
-                if (cancelledAt && now - cancelledAt > CANCEL_TIMEOUT_MS) {
+                if (cancelAcknowledgedAt && now - cancelAcknowledgedAt > CANCEL_TIMEOUT_MS) {
                     return { type: 'cancelled' };
                 }
 

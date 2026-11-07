@@ -48,6 +48,34 @@ test('checkRunScope enforces the limit without double counting, and 0 removes it
     assert.strictEqual(logic.checkRunScope([foo], 0).needsConfirmation, false);
 });
 
+test('buildTree passes [Explicit] from a parameterized method to its cases', () => {
+    const marked = flat.map((node, i) => (i === 5 ? { ...node, isExplicit: true } : node));
+    const [adds, cases] = logic.buildTree(marked)[0].children[0].children[0].children;
+    assert.strictEqual(adds.isExplicit, false);
+    assert.strictEqual(cases.children[0].isExplicit, true);
+});
+
+test('findSlowTests flags slow recorded times, and [Explicit] tests only until they have one', () => {
+    const leaves = [
+        { fullName: 'A', name: 'A', isExplicit: false },
+        { fullName: 'B', name: 'B', isExplicit: true },
+        { fullName: 'C', name: 'C', isExplicit: true },
+        { fullName: 'D', name: 'D', isExplicit: false },
+    ];
+    const slow = logic.findSlowTests(leaves, { A: 12, C: 0.5, D: 3 }, 10);
+    assert.deepStrictEqual(slow, [
+        { fullName: 'A', name: 'A', seconds: 12 },
+        { fullName: 'B', name: 'B', seconds: null },
+    ]);
+    assert.deepStrictEqual(logic.findSlowTests(leaves, { A: 12 }, 0).map(t => t.fullName), ['B', 'C']);
+});
+
+test('describeSlowTests names a single test and totals several', () => {
+    assert.match(logic.describeSlowTests([{ name: 'Deep', seconds: 443 }]).title, /^Deep held Unity for 7 min/);
+    assert.match(logic.describeSlowTests([{ name: 'Deep', seconds: null }]).title, /\[Explicit\]/);
+    assert.match(logic.describeSlowTests([{ name: 'A', seconds: 30 }, { name: 'B', seconds: 45 }]).title, /^2 slow tests held Unity for 75 s/);
+});
+
 test('LineBuffer holds partial lines and multi-byte characters until complete', () => {
     const buffer = new logic.LineBuffer();
     const bytes = Buffer.from('{"a":"ñ"}\n{"b":1}\n');

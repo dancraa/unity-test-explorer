@@ -10,6 +10,7 @@ const INSTALL_BRIDGE = 'Install';
 const RUN_IN_WORKER = 'Run in Worker';
 const RUN_IN_UNITY = 'Run in Unity';
 const LARGE_RUN_NOTICE_KEY = 'unityTests.largeRunNoticeShown';
+const DURATIONS_KEY = 'unityTests.durations';
 
 function activate(context) {
     const folder = (vscode.workspace.workspaceFolders || [])
@@ -132,9 +133,18 @@ function activate(context) {
         return message;
     }
 
+    function durations() {
+        return context.workspaceState.get(DURATIONS_KEY, {});
+    }
+
+    function recordDuration(fullName, seconds) {
+        context.workspaceState.update(DURATIONS_KEY, { ...durations(), [fullName]: seconds });
+    }
+
     function reportResult(run, event) {
         const item = itemsByFullName.get(event.fullName);
         if (!item) return false;
+        if (event.status === 'passed' || event.status === 'failed') recordDuration(event.fullName, event.duration);
         const duration = event.duration * 1000;
         if (event.status === 'passed') run.passed(item, duration);
         else if (event.status === 'failed') run.failed(item, failureMessage(event), duration);
@@ -171,6 +181,9 @@ function activate(context) {
                 const item = itemsByFullName.get(event.fullName);
                 if (event.type === 'started' && item) {
                     run.started(item);
+                } else if (event.type === 'status') {
+                    run.appendOutput(`${event.message}\r\n`);
+                    vscode.window.showInformationMessage(`Unity Tests: ${event.message}`);
                 } else if (event.type === 'test' && reportResult(run, event)) {
                     remaining.delete(event.fullName);
                 }
@@ -199,9 +212,22 @@ function activate(context) {
             'Unity will be jerky during large test runs, and slow tests can stall it. To keep it free, turn on the Unity Tests: Enable Worker setting, which keeps a copy of your project next to it.');
     }
 
+    /** Resolves to RUN_IN_UNITY, RUN_IN_WORKER, or undefined when the run was called off. */
+    async function confirmSlowRun(slow) {
+        const { title, detail } = logic.describeSlowTests(slow);
+        const choices = isWorkerEnabled() ? [RUN_IN_WORKER, RUN_IN_UNITY] : [RUN_IN_UNITY];
+        return vscode.window.showWarningMessage(title, { modal: true, detail }, ...choices);
+    }
+
     async function runInEditor(request, token) {
         const { scope, leaves, names } = resolveSelection(request);
-        if (scope.needsConfirmation && !isWorkerEnabled()) {
+        const threshold = vscode.workspace.getConfiguration('unityTests').get('slowTestSeconds');
+        const slow = logic.findSlowTests(leaves, durations(), threshold);
+        if (slow.length > 0) {
+            const choice = await confirmSlowRun(slow);
+            if (choice === RUN_IN_WORKER) return runInWorker(request, token);
+            if (choice !== RUN_IN_UNITY) return;
+        } else if (scope.needsConfirmation && !isWorkerEnabled()) {
             showLargeRunNotice();
         } else if (scope.needsConfirmation) {
             const choice = await vscode.window.showWarningMessage(

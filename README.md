@@ -29,7 +29,8 @@ Click run on a class or test to run it in your open Editor. Each run first impor
 
 Between Edit Mode tests, the Editor gets at least one frame, and up to 100 ms more after slower tests. This makes a run take slightly longer. You can click around and use the Editor, but expect it to be jerky:
 
-- A single test can't be interrupted, so a slow test stalls the Editor until it finishes.
+- A single test can't be interrupted, so a slow test stalls the Editor until it finishes. Before running a test that took 10 s or more last time, or an `[Explicit]` test that hasn't run yet, the extension asks first.
+- Cancelling takes effect once the current test finishes. Until then the run stays open and says so, rather than showing as cancelled while Unity keeps going.
 - You can't compile or enter Play Mode until the run ends.
 - Play Mode tests already run across frames, so they aren't changed.
 - Runs started from Unity's own Test Runner window aren't changed either.
@@ -95,6 +96,7 @@ It exits with 0 if all tests passed, 1 if any failed, and 2 if the run itself fa
 | --- | --- | --- |
 | `unityTests.enableWorker` | `false` | Adds **Run in Worker**. It keeps a copy of your project next to it. |
 | `unityTests.maxTestsPerRun` | `500` | With the worker enabled, ask where to run when a run has more tests than this. `0` removes the limit. |
+| `unityTests.slowTestSeconds` | `10` | Ask before running a test in the open Editor if it took at least this long last time. `[Explicit]` tests ask until they've run once. `0` asks only for `[Explicit]` tests. |
 | `unityTests.sourceGlob` | empty | Files searched to link tests to their source. Empty finds them from your test assembly definitions. |
 
 ## How it works

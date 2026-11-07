@@ -26,6 +26,8 @@ function buildTree(flat) {
     nodes.forEach(node => {
         if (node.parent < 0) return;
         const parent = nodes[node.parent];
+        // Parents come first in the list, and [Explicit] on a parameterized method covers its cases.
+        node.isExplicit = Boolean(node.isExplicit || parent.isExplicit);
         if (parent.parent < 0) roots.push(node);
         else parent.children.push(node);
     });
@@ -47,6 +49,40 @@ function checkRunScope(nodes, maxTests) {
     const count = new Set(nodes.flatMap(n => leavesOf(n).map(l => l.fullName))).size;
     const broad = nodes.some(n => !n.typeName);
     return { needsConfirmation: broad || (maxTests > 0 && count > maxTests), broad, count };
+}
+
+/**
+ * Tests that would hold the Editor for a while: slower than the threshold last time they ran, or
+ * [Explicit] with no recorded time. `durations` maps full names to seconds.
+ */
+function findSlowTests(leaves, durations, thresholdSeconds) {
+    return leaves
+        .map(leaf => ({ leaf, seconds: durations[leaf.fullName] }))
+        .filter(({ leaf, seconds }) => seconds === undefined ? leaf.isExplicit : thresholdSeconds > 0 && seconds >= thresholdSeconds)
+        .map(({ leaf, seconds }) => ({ fullName: leaf.fullName, name: leaf.name, seconds: seconds === undefined ? null : seconds }));
+}
+
+function formatDuration(seconds) {
+    if (seconds < 90) return `${Math.round(seconds)} s`;
+    return `${Math.round(seconds / 60)} min`;
+}
+
+/** The confirmation shown before slow tests run in the open Editor. */
+function describeSlowTests(slow) {
+    const timed = slow.filter(test => test.seconds !== null);
+    const total = timed.reduce((sum, test) => sum + test.seconds, 0);
+    let title;
+    if (slow.length === 1 && timed.length === 1) {
+        title = `${slow[0].name} held Unity for ${formatDuration(total)} last time it ran.`;
+    } else if (slow.length === 1) {
+        title = `${slow[0].name} is marked [Explicit], which usually means it's slow.`;
+    } else if (timed.length === slow.length) {
+        title = `${slow.length} slow tests held Unity for ${formatDuration(total)} in total last time they ran.`;
+    } else {
+        title = `${slow.length} slow or [Explicit] tests are in this run.`;
+    }
+    const detail = 'Unity freezes while a test runs, and cancelling only takes effect once that test finishes.';
+    return { title, detail };
 }
 
 /** Splits nodes into the per-mode name lists the bridge runs. */
@@ -119,6 +155,9 @@ module.exports = {
     isLeaf,
     leavesOf,
     checkRunScope,
+    findSlowTests,
+    formatDuration,
+    describeSlowTests,
     namesByMode,
     labelOf,
     isTestAssemblyDefinition,
