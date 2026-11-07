@@ -1,8 +1,8 @@
 {
   "name": "test-explorer-for-unity",
   "displayName": "Test Explorer for Unity",
-  "description": "Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, in your open Editor or in a background worker that keeps it free.",
-  "version": "0.2.0",
+  "description": "Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, with the Editor staying usable while they run, or in an optional background worker.",
+  "version": "0.2.1",
   "publisher": "dancra",
   "license": "MIT",
   "icon": "icon.png",
@@ -25,10 +25,15 @@
     "configuration": {
       "title": "Unity Tests",
       "properties": {
+        "unityTests.enableWorker": {
+          "type": "boolean",
+          "default": false,
+          "description": "Adds Run in Worker, which runs tests in a headless Unity and keeps your Editor free. It keeps a copy of your project in a folder next to it, roughly the same size as the project."
+        },
         "unityTests.maxTestsPerRun": {
           "type": "number",
           "default": 500,
-          "description": "Ask where to run when a run has more tests than this, since tests slow the Editor down while they run. 0 removes the limit."
+          "description": "With the worker enabled, ask where to run when a run has more tests than this. 0 removes the limit."
         },
         "unityTests.sourceGlob": {
           "type": "string",

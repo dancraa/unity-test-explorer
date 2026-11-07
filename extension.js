@@ -9,6 +9,7 @@ const install = require('./install');
 const INSTALL_BRIDGE = 'Install';
 const RUN_IN_WORKER = 'Run in Worker';
 const RUN_IN_UNITY = 'Run in Unity';
+const LARGE_RUN_NOTICE_KEY = 'unityTests.largeRunNoticeShown';
 
 function activate(context) {
     const folder = (vscode.workspace.workspaceFolders || [])
@@ -187,9 +188,22 @@ function activate(context) {
         }
     }
 
+    function isWorkerEnabled() {
+        return vscode.workspace.getConfiguration('unityTests').get('enableWorker') === true;
+    }
+
+    function showLargeRunNotice() {
+        if (context.globalState.get(LARGE_RUN_NOTICE_KEY)) return;
+        context.globalState.update(LARGE_RUN_NOTICE_KEY, true);
+        vscode.window.showInformationMessage(
+            'Unity will be jerky during large test runs, and slow tests can stall it. To keep it free, turn on the Unity Tests: Enable Worker setting, which keeps a copy of your project next to it.');
+    }
+
     async function runInEditor(request, token) {
         const { scope, leaves, names } = resolveSelection(request);
-        if (scope.needsConfirmation) {
+        if (scope.needsConfirmation && !isWorkerEnabled()) {
+            showLargeRunNotice();
+        } else if (scope.needsConfirmation) {
             const choice = await vscode.window.showWarningMessage(
                 `Run ${scope.count} tests?`,
                 { modal: true, detail: 'The worker runs them in the background and keeps Unity free. In Unity, the Editor is jerky until they finish, and slow tests can stall it.' },
@@ -221,8 +235,21 @@ function activate(context) {
         }));
     }
 
-    controller.createRunProfile('Run in Unity', vscode.TestRunProfileKind.Run, runInEditor, true);
-    controller.createRunProfile(RUN_IN_WORKER, vscode.TestRunProfileKind.Run, runInWorker, false);
+    controller.createRunProfile(RUN_IN_UNITY, vscode.TestRunProfileKind.Run, runInEditor, true);
+
+    let workerProfile = null;
+    function syncWorkerProfile() {
+        if (isWorkerEnabled() && !workerProfile) {
+            workerProfile = controller.createRunProfile(RUN_IN_WORKER, vscode.TestRunProfileKind.Run, runInWorker, false);
+        } else if (!isWorkerEnabled() && workerProfile) {
+            workerProfile.dispose();
+            workerProfile = null;
+        }
+    }
+    syncWorkerProfile();
+    context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('unityTests.enableWorker')) syncWorkerProfile();
+    }));
 }
 
 function deactivate() {}

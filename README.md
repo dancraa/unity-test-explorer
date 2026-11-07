@@ -2,7 +2,7 @@
 
 Run Unity Edit Mode and Play Mode tests from the VS Code Testing tab, with failure messages, stack traces and links to the failing line.
 
-Tests normally freeze the Unity Editor while they run. This extension gives the Editor time between Edit Mode tests, so it stays usable, though jerky. To keep it fully free, you can use a **background worker**: a headless Unity working on its own copy of your project.
+Tests normally freeze the Unity Editor while they run. This extension gives the Editor time between Edit Mode tests, so it stays usable, though jerky. If you need it fully free, there's an optional [background worker](#the-background-worker).
 
 > This is an independent project. It isn't affiliated with or endorsed by Unity Technologies.
 
@@ -25,19 +25,12 @@ The bridge is a small Editor-only package at `Packages/com.dancra.vscode-test-br
 
 Click run on a class or test to run it in your open Editor. Each run first imports the changes you've saved, so unsaved edits in VS Code aren't included.
 
-For Run All, anything above class level, or more than 500 tests, you're asked where to run:
-
-- **Run in Worker** runs them in the background and keeps Unity free.
-- **Run in Unity** runs them in the Editor, using no extra disk space.
-
-To use the worker for a smaller run, right-click it and choose **Execute Using Profile...**.
-
 ### How the Editor behaves during a run
 
 Between Edit Mode tests, the Editor gets at least one frame, and up to 100 ms more after slower tests. This makes a run take slightly longer. You can click around and use the Editor, but expect it to be jerky:
 
 - A single test can't be interrupted, so a slow test stalls the Editor until it finishes.
-- You can't compile or enter Play Mode until the run ends. Use the worker if you need to.
+- You can't compile or enter Play Mode until the run ends.
 - Play Mode tests already run across frames, so they aren't changed.
 - Runs started from Unity's own Test Runner window aren't changed either.
 
@@ -45,11 +38,15 @@ This relies on a private part of the Test Framework. If a future version changes
 
 Runs in the open Editor are refused during Play Mode, with compile errors, or with unsaved open scenes, because each of those would make the run fail or block the Editor.
 
-Test Framework 1.1, which Unity 2021.3 and 2022.3 can come with, can't cancel a run. In the open Editor, the run keeps going until it finishes. Cancelling always works in the worker.
+Test Framework 1.1, which Unity 2021.3 and 2022.3 can come with, can't cancel a run. In the open Editor, the run keeps going until it finishes.
 
 ## The background worker
 
-The worker keeps a one-way copy of your project in a folder next to it, named `<project>-TestWorker`.
+This is optional and off by default. It runs tests in a headless Unity on its own copy of your project, so you can keep working in the Editor, including compiling and entering Play Mode. The cost is a folder next to your project, roughly the same size as the project.
+
+To use it, turn on the `unityTests.enableWorker` setting. Run All, anything above class level, or more than 500 tests then ask where to run. To use the worker for a smaller run, right-click it and choose **Execute Using Profile...**. Cancelling always works in the worker.
+
+The worker keeps a one-way copy of your project in a folder named `<project>-TestWorker`.
 
 - Each run copies `Assets`, `Packages` and `ProjectSettings`. Nothing is ever written back to your project.
 - Anything you change in the worker folder is overwritten by the next run.
@@ -78,7 +75,7 @@ Add a `.unity-test-worker.json` file to your project's root if the worker needs 
 
 ## Command line
 
-The worker can also run from a terminal or CI script, or by a coding agent:
+The worker can also run from a terminal or CI script, or by a coding agent, whatever the setting says. This creates the worker folder too:
 
 ```shell
 npm install --global github:dancraa/unity-test-explorer
@@ -96,7 +93,8 @@ It exits with 0 if all tests passed, 1 if any failed, and 2 if the run itself fa
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `unityTests.maxTestsPerRun` | `500` | Ask where to run when a run has more tests than this. `0` removes the limit. |
+| `unityTests.enableWorker` | `false` | Adds **Run in Worker**. It keeps a copy of your project next to it. |
+| `unityTests.maxTestsPerRun` | `500` | With the worker enabled, ask where to run when a run has more tests than this. `0` removes the limit. |
 | `unityTests.sourceGlob` | empty | Files searched to link tests to their source. Empty finds them from your test assembly definitions. |
 
 ## How it works
