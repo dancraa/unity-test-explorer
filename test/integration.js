@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { UnityBridge } = require('../bridge');
 const { installBridge } = require('../install');
+const { isProcessAlive } = require('../lock');
 const { TestWorker } = require('../worker');
 
 const [unityExe, projectRootArg] = process.argv.slice(2);
@@ -48,9 +49,37 @@ namespace Fixture.Edit
     public class EditSampleTests
     {
         [Test] public void Passes() { Assert.Pass(); }
-        [Test] public void Fails() { Assert.AreEqual(1, 2, "edit failure"); }
+        [Test] public void Fails() { UnityEngine.Debug.Log("edit log"); Assert.AreEqual(1, 2, "edit failure"); }
         [Test, Ignore("edit skip")] public void Skipped() { }
         [TestCase(1)] [TestCase(2)] public void Cases(int value) { Assert.AreEqual(1, value); }
+    }
+
+    public class OutcomeSampleTests
+    {
+        [Test] public void Inconclusive() { Assert.Inconclusive("not sure"); }
+    }
+
+    [Explicit]
+    public class SlowSampleTests
+    {
+        [Test] public void HoldsTheMainThread() { System.Threading.Thread.Sleep(300000); }
+    }
+
+    [TestFixture(1)]
+    [TestFixture(2)]
+    public class FixtureSampleTests
+    {
+        private readonly int value;
+        public FixtureSampleTests(int value) { this.value = value; }
+        [Test] public void IsPositive() { Assert.Greater(value, 0); }
+    }
+}
+
+namespace Fixture.Edit.Twin
+{
+    public class OutcomeSampleTests
+    {
+        [Test] public void Passes() { }
     }
 }
 `;
@@ -105,7 +134,8 @@ function check(label, actual, expected) {
 }
 
 function results(events) {
-    return Object.fromEntries(events.filter(e => e.type === 'test').map(e => [e.fullName.replace(/^Fixture\.\w+\./, ''), e.status]));
+    // Whether a full run reports [Explicit] tests as skipped or not at all depends on the Test Framework version.
+    return Object.fromEntries(events.filter(e => e.type === 'test' && !e.fullName.includes('SlowSampleTests')).map(e => [e.fullName.replace(/^Fixture\.\w+\./, ''), e.status]));
 }
 
 const ALL_RESULTS = {
@@ -116,8 +146,12 @@ const ALL_RESULTS = {
     'EditSampleTests.Fails': 'failed',
     'EditSampleTests.Passes': 'passed',
     'EditSampleTests.Skipped': 'skipped',
+    'FixtureSampleTests(1).IsPositive': 'passed',
+    'FixtureSampleTests(2).IsPositive': 'passed',
+    'OutcomeSampleTests.Inconclusive': 'inconclusive',
     'PlaySampleTests.FailsAfterAFrame': 'failed',
     'PlaySampleTests.PassesAfterAFrame': 'passed',
+    'Twin.OutcomeSampleTests.Passes': 'passed',
 };
 
 function sorted(object) {
@@ -157,6 +191,130 @@ async function testWorker() {
     check('worker: only the named test runs', results(unmatched), { 'EditSampleTests.Passes': 'passed' });
 }
 
+const CLI = path.join(__dirname, '..', 'cli.js');
+
+function startCli(...args) {
+    const child = spawn(process.execPath, [CLI, '--project', projectRoot, ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', data => { stdout += data; });
+    child.stderr.on('data', data => { stderr += data; });
+    const done = new Promise(resolve => child.on('close', code => resolve({ code, stdout, stderr })));
+    return { child, done };
+}
+
+async function cli(...args) {
+    const start = Date.now();
+    const result = await startCli(...args).done;
+    console.log(`     unity-tests ${args.join(' ')}: ${Math.round((Date.now() - start) / 1000)} s`);
+    if (result.code === 2) console.log(`     exit 2: ${result.stderr.trim()}`);
+    return args.includes('--json') ? { ...result, json: JSON.parse(result.stdout) } : result;
+}
+
+async function waitFor(condition, seconds) {
+    for (let waited = 0; waited < seconds * 5; waited++) {
+        if (condition()) return true;
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    return false;
+}
+
+async function testCli() {
+    const worker = new TestWorker(projectRoot);
+    const isRunningSlowTest = () => fs.existsSync(worker.eventsPath) && /"started".*HoldsTheMainThread/.test(fs.readFileSync(worker.eventsPath, 'utf8'));
+    const unityPid = () => fs.existsSync(worker.lock.pidPath) ? Number(fs.readFileSync(worker.lock.pidPath, 'utf8')) : 0;
+    const names = run => run.json.tests.map(result => result.fullName.replace(/^Fixture\.\w+\./, '')).sort();
+
+    let run = await cli('EditSampleTests.Passes', 'PlaySampleTests', '--json');
+    check('cli: short names run the right tests', names(run), ['EditSampleTests.Passes', 'PlaySampleTests.FailsAfterAFrame', 'PlaySampleTests.PassesAfterAFrame']);
+    check('cli: a failure exits 1', run.code, 1);
+    check('cli: matched names are reported', run.json.matched.map(m => [m.fullName, m.tests]), [['Fixture.Edit.EditSampleTests.Passes', 1], ['Fixture.Play.PlaySampleTests', 2]]);
+
+    run = await cli('FixtureSampleTests');
+    check('cli: a class with several fixtures runs them all', [run.code, /2 tests matched/.test(run.stdout), /2 passed/.test(run.stdout)], [0, true, true]);
+
+    run = await cli('EditSampleTests', 'EditSampelTests', '--json');
+    check('cli: a misspelled name exits 3 and runs nothing', [run.code, run.json.tests.length], [3, 0]);
+    check('cli: the closest name is suggested', run.json.unmatched.map(u => u.suggestions[0]), ['Fixture.Edit.EditSampleTests']);
+
+    run = await cli('OutcomeSampleTests');
+    check('cli: an ambiguous name lists its candidates', [run.code, run.stdout.includes('Fixture.Edit.Twin.OutcomeSampleTests')], [3, true]);
+
+    run = await cli('Fixture.Edit.OutcomeSampleTests.Inconclusive');
+    check('cli: inconclusive exits 1', [run.code, run.stdout.includes('INCONCLUSIVE')], [1, true]);
+
+    run = await cli('--mode', 'play', 'EditSampleTests');
+    check('cli: says which mode a name is in', [run.code, run.stdout.includes('Edit Mode test')], [3, true]);
+
+    const junit = path.join(projectRoot, 'junit.xml');
+    run = await cli('--mode', 'edit', '--json', '--junit', junit);
+    const expected = Object.keys(ALL_RESULTS).filter(name => !name.startsWith('PlaySample'));
+    check('cli: --mode edit without names runs only Edit Mode tests', names(run).filter(name => !name.includes('SlowSample')), expected.sort());
+    check('cli: every expected test reported', [run.code, run.json.missing], [1, []]);
+    check("cli: a failure's log is separate", run.json.tests.filter(result => /edit log/.test(result.output)).map(result => /edit log/.test(result.message)), [false]);
+    check('cli: JUnit is written', /<testcase classname="Fixture.Edit.EditSampleTests" name="Cases\(2\)"/.test(fs.readFileSync(junit, 'utf8')), true);
+
+    run = await cli('--failed', '--mode', 'edit', '--json');
+    check('cli: --failed reruns only the failures', [run.code, ...names(run)], [1, 'EditSampleTests.Cases(2)', 'EditSampleTests.Fails', 'OutcomeSampleTests.Inconclusive']);
+
+    run = await cli('--list');
+    check('cli: --list counts classes', [run.code, run.stdout.includes('Fixture.Edit.EditSampleTests (5)'), run.stdout.includes('Fixture.Play.PlaySampleTests  [Play Mode] (2)')], [0, true, true]);
+    run = await cli('--list', 'cases');
+    check('cli: --list with a pattern', [run.code, run.stdout.includes('EditSampleTests.Cases(1)'), /2 tests$/m.test(run.stdout)], [0, true, true]);
+
+    run = await cli('--check');
+    check('cli: --check on code that compiles', [run.code, /Compiled OK/.test(run.stdout)], [0, true]);
+    write('Assets/Tests/Edit/Broken.cs', 'class Broken { int x = "text"; }');
+    for (const attempt of ['with new errors', 'with the same errors']) {
+        run = await cli('--check');
+        check(`cli: --check ${attempt}`, [run.code, /Broken\.cs.*error CS0029/.test(run.stdout)], [1, true]);
+    }
+    run = await cli('EditSampleTests.Passes');
+    check('cli: a run with compile errors exits 2', [run.code, /error CS0029/.test(run.stderr)], [2, true]);
+    fs.rmSync(path.join(projectRoot, 'Assets/Tests/Edit/Broken.cs'));
+    run = await cli('--check');
+    check('cli: --check after the fix', [run.code, /Synced 1 changed file/.test(run.stdout)], [0, true]);
+
+    const savesTest = 'Assets/Tests/Edit/SavesSampleTests.cs';
+    write(savesTest, 'namespace Fixture.Edit { public class SavesSampleTests { [NUnit.Framework.Test] public void Path() { NUnit.Framework.Assert.Inconclusive(UnityEngine.Application.persistentDataPath); } } }');
+    const savesPath = async () => (await cli('SavesSampleTests', '--json')).json.tests[0].message.trim();
+    const shared = await savesPath();
+    write('.unity-test-worker.json', '{"separateSaves": true}');
+    const separate = await savesPath();
+    check('cli: separateSaves gives the worker its own folder', [/-TestWorker$/.test(shared), /-TestWorker$/.test(separate)], [false, true]);
+    run = await cli('SavesSampleTests', '--json');
+    check('cli: separateSaves is not a change on every run', run.json.sync.changed, 0);
+    fs.rmSync(path.join(projectRoot, '.unity-test-worker.json'));
+    check('cli: turning separateSaves off undoes it', await savesPath(), shared);
+    fs.rmSync(path.join(projectRoot, savesTest));
+
+    let slow = startCli('SlowSampleTests');
+    check('cli: an [Explicit] test runs when named', await waitFor(isRunningSlowTest, 120), true);
+    let pid = unityPid();
+    run = await cli('EditSampleTests.Passes');
+    check('cli: a busy worker is refused', [run.code, /already running/.test(run.stderr)], [2, true]);
+    slow.child.kill('SIGKILL');
+    check('cli: Unity stops when its owner is killed', await waitFor(() => !isProcessAlive(pid), 20), true);
+    run = await cli('EditSampleTests.Passes');
+    check('cli: the next run works', run.code, 0);
+
+    slow = startCli('SlowSampleTests', '--json');
+    await waitFor(isRunningSlowTest, 120);
+    pid = unityPid();
+    const queued = startCli('EditSampleTests.Passes', '--wait');
+    run = await cli('--stop');
+    check('cli: --stop', [run.code, /Stopped the run started .* by unity-tests .*SlowSampleTests/.test(run.stdout), isProcessAlive(pid)], [0, true, false]);
+    const stopped = await slow.done;
+    check('cli: the stopped run says so', [stopped.code, JSON.parse(stopped.stdout).error], [2, 'Stopped by unity-tests --stop.\nIt was running Fixture.Edit.SlowSampleTests.HoldsTheMainThread.']);
+    const waited = await queued.done;
+    check('cli: --wait runs once the worker is free', [waited.code, /Waiting for another run/.test(waited.stdout)], [0, true]);
+
+    run = await cli('--timeout', '5', 'SlowSampleTests');
+    check('cli: --timeout', [run.code, /Timed out after 5 s/.test(run.stderr)], [2, true]);
+    run = await cli('--stop');
+    check('cli: nothing left to stop', /No worker is running/.test(run.stdout), true);
+}
+
 // A batch Unity without -quit stands in for an open Editor: it stays up and polls for commands.
 async function testEditor() {
     const editor = spawn(unityExe, ['-batchmode', '-projectPath', projectRoot, '-logFile', `${projectRoot}-editor.log`], { stdio: 'ignore' });
@@ -177,7 +335,7 @@ async function testEditor() {
         }
         const modes = [...new Set(list.tests.filter(t => !t.isSuite).map(t => t.mode))].sort();
         check('editor: list covers both modes', modes, ['edit', 'play']);
-        check('editor: test count', list.tests.filter(t => !t.isSuite).length, 9);
+        check('editor: test count', list.tests.filter(t => !t.isSuite).length, 14);
 
         const action = [];
         await bridge.send({ action: 'run', editNames: ['Fixture.Edit.ActionSampleTests'] }, e => action.push(e));
@@ -237,6 +395,7 @@ async function testEditor() {
 (async () => {
     createProject();
     await testWorker();
+    await testCli();
     await testEditor();
     console.log(failures === 0 ? 'ALL PASSED' : `${failures} CHECK(S) FAILED`);
     process.exitCode = failures === 0 ? 0 : 1;

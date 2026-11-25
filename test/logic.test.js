@@ -144,3 +144,9 @@ test('parseFailureLocation reads both stack formats and skips frames outside the
     assert.strictEqual(logic.parseFailureLocation(`at Bar () in ${path.resolve('elsewhere', 'Bar.cs')}:line 3`, root), null);
     assert.strictEqual(logic.parseFailureLocation(undefined, root), null);
 });
+
+test('mapWorkerPaths ignores case only on Windows', () => {
+    const text = 'in C:\Game-TestWorker\Assets\A.cs:1';
+    assert.strictEqual(mapWorkerPaths(text, 'c:\Game-TestWorker', 'c:\Game', 'win32'), 'in c:\Game\Assets\A.cs:1');
+    assert.strictEqual(mapWorkerPaths(text, 'c:\Game-TestWorker', 'c:\Game', 'linux'), text);
+});

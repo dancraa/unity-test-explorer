@@ -3,7 +3,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { mirror } = require('../mirror');
+const { mirror, measureTolerance, FINE_TOLERANCE_MS } = require('../mirror');
 
 function tempFolders(t) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-test-'));
@@ -65,4 +65,48 @@ test('never changes the source', async t => {
 
     assert.deepStrictEqual(fs.readdirSync(source), before);
     assert.strictEqual(fs.readFileSync(path.join(source, 'file.txt'), 'utf8'), 'original');
+});
+
+test('tells an edit in the source from one made in the target', async t => {
+    const { source, target } = tempFolders(t);
+    write(source, 'edited.txt', 'one');
+    write(source, 'rewritten.txt', 'one');
+    write(source, 'Added.cs', 'one');
+    const past = new Date(Date.now() - 60000);
+    for (const name of ['edited.txt', 'rewritten.txt', 'Added.cs']) fs.utimesSync(path.join(source, name), past, past);
+    await mirror(source, target);
+
+    write(source, 'edited.txt', 'edited by the user');
+    write(target, 'rewritten.txt', 'written by Unity');
+    write(target, 'Added.cs.meta', 'added by Unity');
+
+    const { copied, deleted, restored } = await mirror(source, target);
+    assert.deepStrictEqual({ copied, deleted, restored }, { copied: 2, deleted: 1, restored: 2 });
+});
+
+test('stops when cancelled', async t => {
+    const { source, target } = tempFolders(t);
+    write(source, 'file.txt', 'original');
+    assert.strictEqual((await mirror(source, target, { isCancelled: () => true })).copied, 0);
+});
+
+test('copies a same-size edit saved moments after the last one', async t => {
+    const { source, target } = tempFolders(t);
+    const file = path.join(source, 'file.txt');
+    const saved = Date.now() - 60000;
+    write(source, 'file.txt', '1');
+    fs.utimesSync(file, new Date(saved), new Date(saved));
+    await mirror(source, target);
+
+    write(source, 'file.txt', '2');
+    fs.utimesSync(file, new Date(saved + 300), new Date(saved + 300));
+    assert.strictEqual((await mirror(source, target)).copied, 1);
+    assert.strictEqual(fs.readFileSync(path.join(target, 'file.txt'), 'utf8'), '2');
+});
+
+test('measures how precise timestamps are and cleans up', async t => {
+    const { source } = tempFolders(t);
+    fs.mkdirSync(source);
+    assert.strictEqual(await measureTolerance(source), FINE_TOLERANCE_MS);
+    assert.deepStrictEqual(fs.readdirSync(source), []);
 });

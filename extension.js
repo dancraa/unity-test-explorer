@@ -125,7 +125,7 @@ function activate(context) {
     };
 
     function failureMessage(event) {
-        const text = [event.message, event.stack].filter(Boolean).join('\n\n');
+        const text = [event.message, event.output, event.stack].filter(Boolean).join('\n\n');
         const message = new vscode.TestMessage(text || 'Test failed.');
         const location = logic.parseFailureLocation(event.stack, projectRoot);
         if (location) {
@@ -256,6 +256,7 @@ function activate(context) {
         const isRunAll = !request.include && !(request.exclude || []).length;
         await reportRun(request, leaves, (run, onEvent) => worker.run({
             ...(isRunAll ? {} : names),
+            startedBy: 'VS Code',
             onEvent,
             onStatus: text => run.appendOutput(`${text}\r\n`),
             cancellation: token,

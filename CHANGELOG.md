@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.4.0
+
+Most of this is for the `unity-tests` command. Update the bridge package when prompted.
+
+Fixed:
+
+- A name that matches no test is now an error (exit code 3) instead of a successful run of zero tests. Each name is checked, so a valid one can't hide a misspelled one.
+- Class names and `Class.Method` work without the namespace. A name that matches several things lists them, and one that matches nothing suggests the closest.
+- `--mode edit` or `--mode play` without names runs only that mode.
+- Unknown options are rejected instead of being treated as test names.
+- Inconclusive tests exit with 1, and a test that should have run but reported nothing exits with 2.
+- An edit of the same size, saved within 2 seconds of the version last synced, is no longer missed by the worker.
+- On Windows, failures from **Run in Worker** link to their source.
+- Killing `unity-tests` or VS Code no longer leaves the worker's Unity running and blocking the next run.
+
+Added:
+
+- `--check` syncs and compiles only, `--list` finds tests, `--failed` reruns the last run's failures, `--wait` queues behind a running worker or for memory, `--stop` ends one, `--timeout` limits a run, and `--version` prints the version.
+- `--json` and `--junit <file>`.
+- `separateSaves` in `.unity-test-worker.json` keeps the worker's saves and `PlayerPrefs` apart from the Editor's.
+- A run that's stopped or times out names the test it was in, and a busy worker says who started the run and when.
+- Each run says how many files it synced and how many tests matched. Failures print as they happen, progress shows during the run, and the slowest tests are listed at the end.
+- Long failure messages and logs are shortened unless you pass `--verbose`.
+- A warning when the project's bridge and `unity-tests` are different versions. The worker now always uses the bridge that came with the command or extension that started it.
+
 ## 0.3.1
 
 - Tests now list while Unity is in Play Mode, so the Testing tab isn't empty after reloading VS Code mid-playtest. Listing in Play Mode skips the asset refresh, which could recompile and end the session. Runs are still refused until you exit Play Mode. Update the bridge package when prompted.

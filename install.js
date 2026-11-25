@@ -35,4 +35,4 @@ function installBridge(projectRoot) {
     fs.cpSync(BUNDLED_PACKAGE, embeddedPath(projectRoot), { recursive: true, force: true });
 }
 
-module.exports = { PACKAGE_NAME, bundledVersion, installedVersion, needsUpdate, installBridge };
+module.exports = { BUNDLED_PACKAGE, PACKAGE_NAME, bundledVersion, installedVersion, needsUpdate, installBridge };

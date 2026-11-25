@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using UnityEditor;
 using UnityEditor.TestTools.TestRunner.Api;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Debug = UnityEngine.Debug;
 
 namespace VsCodeTests
 {
@@ -18,6 +22,8 @@ namespace VsCodeTests
     public static class VsCodeTestBridge
     {
         private const string WorkerArgument = "-vsCodeTestsWorker";
+        private const string OwnerArgument = "-vsCodeTestsOwner";
+        private const int OwnerCheckMilliseconds = 1000;
         private const string DataDirectory = "Library/VsCodeTests";
         private const string CommandPath = DataDirectory + "/command.json";
         private const double PollSeconds = 0.25;
@@ -29,13 +35,15 @@ namespace VsCodeTests
         private const string RefreshedKey = "VsCodeTests.Refreshed";
         private const string PendingPlayKey = "VsCodeTests.PendingPlay";
         private const string YieldFramesKey = "VsCodeTests.YieldFrames";
+        private const string AwaitingSelectionKey = "VsCodeTests.AwaitingSelection";
 
         private static TestRunnerApi api;
         private static double nextPoll;
         private static int framesInRun;
+        private static bool listedSinceReload;
 
         // Set only in the headless worker, where the path comes from the command line.
-        private static readonly string WorkerDirectory = ReadWorkerDirectory();
+        private static readonly string WorkerDirectory = ReadArgument(WorkerArgument);
 
         static VsCodeTestBridge()
         {
@@ -51,30 +59,116 @@ namespace VsCodeTests
             }
             else
             {
-                EditorApplication.update += CloseWorkerWindows;
+                EditorApplication.update += UpdateWorker;
+                if (int.TryParse(ReadArgument(OwnerArgument), out int ownerId)) ExitWithOwner(ownerId);
             }
         }
 
-        private static string ReadWorkerDirectory()
+        private static string ReadArgument(string name)
         {
             string[] args = Environment.GetCommandLineArgs();
-            int index = Array.IndexOf(args, WorkerArgument);
+            int index = Array.IndexOf(args, name);
             return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
         }
 
-        /// <summary>Starts the tests named in run.json, or all of them. Called through -executeMethod.</summary>
+        // A killed unity-tests or VS Code can't stop the worker itself, so the worker watches for that.
+        // It uses its own thread because a test can hold the main one.
+        private static void ExitWithOwner(int ownerId)
+        {
+            var thread = new Thread(() =>
+            {
+                if (WaitForExit(ownerId)) Process.GetCurrentProcess().Kill();
+            });
+            thread.IsBackground = true;
+            thread.Start();
+        }
+
+        /// <summary>Returns false when the process can't be watched.</summary>
+        private static bool WaitForExit(int processId)
+        {
+            try
+            {
+                using (Process process = Process.GetProcessById(processId))
+                {
+                    // Polled, because a thread blocked in a native wait can hold up a domain reload.
+                    while (!process.HasExited) Thread.Sleep(OwnerCheckMilliseconds);
+                }
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return true;
+            }
+            catch (Exception e) when (e is Win32Exception || e is InvalidOperationException || e is NotSupportedException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Does what run.json asks: "check" ends at once, since getting here means everything compiled;
+        /// "list" reports the tests and waits for a selection; otherwise starts the named tests, or all
+        /// of them. Called through -executeMethod.
+        /// </summary>
         public static void RunInWorker()
         {
             try
             {
                 var run = JsonUtility.FromJson<Command>(File.ReadAllText(WorkerDirectory + "/run.json"));
-                bool all = IsEmpty(run.editNames) && IsEmpty(run.playNames);
-                StartModes(run.editNames, run.playNames, all || !IsEmpty(run.editNames), all || !IsEmpty(run.playNames));
+                if (run.action == "check") EndRun(new BridgeEvent { type = "done" }, 0);
+                else if (run.action == "list") SessionState.SetBool(AwaitingSelectionKey, true);
+                else StartInWorker(run);
             }
             catch (Exception e)
             {
-                Emit(new BridgeEvent { type = "error", message = e.Message });
-                EditorApplication.Exit(1);
+                EndRun(new BridgeEvent { type = "error", message = e.Message }, 1);
+            }
+        }
+
+        private static void StartInWorker(Command run)
+        {
+            bool all = IsEmpty(run.editNames) && IsEmpty(run.playNames);
+            bool runEdit = run.mode != "play" && (all || !IsEmpty(run.editNames));
+            bool runPlay = run.mode != "edit" && (all || !IsEmpty(run.playNames));
+            if (!runEdit && !runPlay) throw new ArgumentException("No tests were named for this mode.");
+            StartModes(run.editNames, run.playNames, runEdit, runPlay);
+        }
+
+        private static void UpdateWorker()
+        {
+            if (EditorApplication.timeSinceStartup < nextPoll) return;
+            nextPoll = EditorApplication.timeSinceStartup + PollSeconds;
+
+            CloseWorkerWindows();
+            if (SessionState.GetBool(AwaitingSelectionKey, false)) PollSelection();
+        }
+
+        // Kept in SessionState and listed again after a reload, which would lose a list in progress.
+        private static void PollSelection()
+        {
+            if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
+
+            string path = WorkerDirectory + "/command.json";
+            try
+            {
+                if (!listedSinceReload)
+                {
+                    listedSinceReload = true;
+                    RetrieveTests(tests => Emit(new BridgeEvent { type = "list", tests = tests }));
+                    return;
+                }
+                if (!File.Exists(path)) return;
+
+                var command = JsonUtility.FromJson<Command>(File.ReadAllText(path));
+                File.Delete(path);
+                SessionState.EraseBool(AwaitingSelectionKey);
+                if (command.action == "run") StartInWorker(command);
+                else EndRun(new BridgeEvent { type = "done" }, 0);
+            }
+            catch (Exception e)
+            {
+                SessionState.EraseBool(AwaitingSelectionKey);
+                EndRun(new BridgeEvent { type = "error", message = e.Message }, 1);
             }
         }
 
@@ -82,9 +176,6 @@ namespace VsCodeTests
         // one from the real Editor. Unity's own windows are left alone.
         private static void CloseWorkerWindows()
         {
-            if (EditorApplication.timeSinceStartup < nextPoll) return;
-            nextPoll = EditorApplication.timeSinceStartup + PollSeconds;
-
             foreach (EditorWindow window in Resources.FindObjectsOfTypeAll<EditorWindow>())
             {
                 if (window.GetType().Assembly.GetName().Name.StartsWith("UnityEditor")) continue;
@@ -236,6 +327,11 @@ namespace VsCodeTests
         private static void List(Command command)
         {
             File.Delete(CommandPath);
+            RetrieveTests(tests => Write(command.id, new BridgeEvent { type = "list", tests = tests }));
+        }
+
+        private static void RetrieveTests(Action<TestNode[]> onRetrieved)
+        {
             var tests = new List<TestNode>();
             api.RetrieveTestList(TestMode.EditMode, editRoot =>
             {
@@ -243,7 +339,7 @@ namespace VsCodeTests
                 api.RetrieveTestList(TestMode.PlayMode, playRoot =>
                 {
                     Flatten(playRoot, -1, "play", tests);
-                    Write(command.id, new BridgeEvent { type = "list", tests = tests.ToArray() });
+                    onRetrieved(tests.ToArray());
                 });
             });
         }
@@ -366,7 +462,8 @@ namespace VsCodeTests
                     type = "test",
                     fullName = result.FullName,
                     status = result.TestStatus.ToString().ToLowerInvariant(),
-                    message = string.IsNullOrEmpty(result.Output) ? result.Message : result.Message + "\n\n" + result.Output,
+                    message = result.Message,
+                    output = result.Output,
                     stack = result.StackTrace,
                     duration = result.Duration,
                 });
@@ -384,6 +481,7 @@ namespace VsCodeTests
             public string id;
             public string action;
             public bool refresh;
+            public string mode;
             public string[] editNames;
             public string[] playNames;
         }
@@ -395,6 +493,7 @@ namespace VsCodeTests
             public string fullName;
             public string status;
             public string message;
+            public string output;
             public string stack;
             public double duration;
             public int frames;

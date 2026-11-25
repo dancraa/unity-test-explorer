@@ -50,6 +50,7 @@ To use it, turn on the `unityTests.enableWorker` setting. Run All, anything abov
 The worker keeps a one-way copy of your project in a folder named `<project>-TestWorker`.
 
 - Each run copies `Assets`, `Packages` and `ProjectSettings`. Nothing is ever written back to your project.
+- The test bridge is the exception: the worker uses the one that came with the extension or `unity-tests`, so it works whichever version your project has.
 - Anything you change in the worker folder is overwritten by the next run.
 - The first run also copies `Library` and may need to compile, so it takes longer and uses about as much disk as your project.
 - It needs about 4 GB of free memory, and only one worker can run at a time.
@@ -57,22 +58,24 @@ The worker keeps a one-way copy of your project in a folder named `<project>-Tes
 **Things to know:**
 
 - Each run tests what's saved on disk when it starts.
-- The worker shares `Application.persistentDataPath` with your Editor, because the company and product names are the same. Unity overwrites `TestResults.xml` there, and tests that write save files there will affect the Editor's copy too.
+- The worker shares `Application.persistentDataPath` and `PlayerPrefs` with your Editor, because the company and product names are the same. Unity overwrites `TestResults.xml` there, and tests that write saves will affect the Editor's copy too. Turn on `separateSaves` to avoid that.
 - Packages can open windows even in batch mode. The bridge closes any window that doesn't come from Unity itself and logs a warning to `WorkerState/unity.log`. A window could still flash briefly, so leave out any package that does this.
 
 ### Project settings
 
-Add a `.unity-test-worker.json` file to your project's root if the worker needs either of these:
+Add a `.unity-test-worker.json` file to your project's root if the worker needs any of these:
 
 ```json
 {
   "excludePackages": ["com.example.package-with-popups"],
-  "extraFiles": ["Tools/data-my-tests-read.csv"]
+  "extraFiles": ["Tools/data-my-tests-read.csv"],
+  "separateSaves": true
 }
 ```
 
 - **`excludePackages`**: packages to leave out of the worker's copy.
 - **`extraFiles`**: files outside `Assets`, `Packages` and `ProjectSettings` that your tests read, relative to the project root.
+- **`separateSaves`**: gives the worker its own product name (`<project>-TestWorker`), so its saves and `PlayerPrefs` are separate from your Editor's. Off by default, because tests that read `Application.productName` see the new name. Needs project settings saved as text, which is Unity's default.
 
 ## Command line
 
@@ -82,13 +85,31 @@ The worker can also run from a terminal or CI script, or by a coding agent, what
 npm install --global github:dancraa/unity-test-explorer
 
 unity-tests                           # every test
-unity-tests Game.Tests.PlayerTests    # named classes or tests
-unity-tests --mode play Game.Tests.X  # look for the names in Play Mode tests only
-unity-tests --project path/to/project
-unity-tests --install-bridge
+unity-tests PlayerTests               # a class
+unity-tests PlayerTests.Jumps         # one test
+unity-tests Game.Tests.PlayerTests    # full names work too
+unity-tests --mode edit               # only Edit Mode tests
+unity-tests --check                   # sync and compile, without running tests
+unity-tests --list player             # find tests by name
+unity-tests --failed                  # only what failed in the last run
+unity-tests --wait --timeout 600 PlayerTests
+unity-tests --stop                    # stop the current run, whoever started it
 ```
 
-It exits with 0 if all tests passed, 1 if any failed, and 2 if the run itself failed. The first run has to happen while the project is open in Unity, which is how the worker finds your Unity install. After that it also works with Unity closed.
+A name is matched as an exact full name first, then as a class, then as `Class.Method`. If any name matches nothing, or several things, no tests run and you get the closest names.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Everything that ran passed (skipped tests are allowed), or the code compiles. |
+| 1 | A test failed or was inconclusive, or `--check` found compile errors. |
+| 2 | The run itself failed, was interrupted, timed out, or didn't report every test. |
+| 3 | A name matched no tests or several names, or there were no tests to run. |
+
+Failures print as they happen, with long messages and logs shortened. `--verbose` shows all of them. `--json` prints one JSON document to stdout, and `--junit <file>` writes a JUnit report. Both include the matched and unmatched names. `unity-tests --help` lists every option.
+
+Ctrl+C stops Unity too. If `unity-tests` or VS Code is killed, Unity notices and stops by itself. If it can't, because it was still importing, the next run stops it.
+
+The first run has to happen while the project is open in Unity, which is how the worker finds your Unity install. After that it also works with Unity closed.
 
 ## Settings
 
