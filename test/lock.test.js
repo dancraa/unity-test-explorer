@@ -77,7 +77,7 @@ test('a stop request from before the run is cleared', async t => {
 });
 
 test('only kills a process that belongs to the worker', async t => {
-    const root = path.join(tempDir(t), 'Juego Din00e1mico-TestWorker');
+    const root = path.join(tempDir(t), 'Juego Din\u00e1mico-TestWorker');
     const worker = idleProcess(t, '-projectPath', root);
     const other = idleProcess(t);
     assert.strictEqual(isWorkerProcess(worker.pid, root), true);
